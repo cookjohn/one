@@ -475,6 +475,20 @@ Set_iptables(){
 	echo -e "net.ipv4.udp_l3mdev_accept = 1" >> /etc/sysctl.conf
 	echo -e "net.ipv4.tcp_l3mdev_accept = 1" >> /etc/sysctl.conf
 	echo -e "net.ipv4.tcp_congestion_control = bbr" >> /etc/sysctl.conf
+	echo -e "net.ipv6.conf.all.forwarding=1" >> /etc/sysctl.conf
+
+	# 增加网络优化参数
+	echo -e "net.core.rmem_max=26214400" >> /etc/sysctl.conf
+	echo -e "net.core.wmem_max=26214400" >> /etc/sysctl.conf
+	echo -e "net.core.rmem_default=26214400" >> /etc/sysctl.conf
+	echo -e "net.core.wmem_default=26214400" >> /etc/sysctl.conf
+	echo -e "net.core.netdev_max_backlog=5000" >> /etc/sysctl.conf
+	echo -e "net.core.optmem_max=25165824" >> /etc/sysctl.conf
+
+	# 增加 UDP 缓冲区
+	echo -e "net.ipv4.udp_mem=4096 87380 16777216" >> /etc/sysctl.conf
+	echo -e "net.ipv4.udp_rmem_min=4096" >> /etc/sysctl.conf
+	echo -e "net.ipv4.udp_wmem_min=4096" >> /etc/sysctl.conf
 	sysctl -p
 	ifconfig_status=$(ifconfig)
 	if [[ -z ${ifconfig_status} ]]; then
