@@ -215,6 +215,7 @@ Install_mosdns(){
 	echo -e "${Info} 下载 geosite 和 geoip 数据文件..."
 	wget --no-check-certificate -O /etc/mosdns/data/geosite.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
 	wget --no-check-certificate -O /etc/mosdns/data/geoip.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+	wget --no-check-certificate -O /etc/mosdns/data/geosite_ads.txt "https://raw.githubusercontent.com/cookjohn/one/main/mosdns/data/geosite_ads.txt"
 
 	# 检查配置文件是否下载成功
 	if [[ ! -s "/etc/mosdns/config.yaml" ]]; then
