@@ -1,0 +1,108 @@
+log:
+  level: debug
+  file: /var/log/mosdns/mosdns.log
+
+data_providers:
+  - tag: geosite
+    file: /etc/mosdns/data/geosite.dat
+    auto_reload: true
+  
+  - tag: geoip
+    file: /etc/mosdns/data/geoip.dat
+    auto_reload: true
+
+  - tag: hosts
+    file: /etc/mosdns/rules/cnki_hosts.txt
+    auto_reload: true
+
+  - tag: cnki_domains
+    file: /etc/mosdns/rules/cnki_domains.txt
+    auto_reload: true
+
+plugins:
+  # 缓存
+  - tag: lazy_cache
+    type: cache
+    args:
+      size: 10000
+      lazy_cache_ttl: 86400
+
+  # 国内DNS转发
+  - tag: forward_local
+    type: forward
+    args:
+      upstream:
+        - addr: 223.5.5.5
+        - addr: 114.114.114.114
+
+  # 海外DNS转发
+  - tag: forward_remote
+    type: forward
+    args:
+      upstream:
+        - addr: 8.8.8.8
+        - addr: 1.1.1.1
+
+  # hosts
+  - tag: hosts
+    type: hosts
+    args:
+      hosts:
+        - provider:hosts
+
+  # 查询匹配器 - 中国域名
+  - tag: query_is_local
+    type: query_matcher
+    args:
+      domain:
+        - provider:geosite:cn
+        - provider:cnki_domains
+
+  # 查询匹配器 - 海外域名
+  - tag: query_is_non_local
+    type: query_matcher
+    args:
+      domain:
+        - provider:geosite:geolocation-!cn
+        - provider:geosite:google
+
+  # 响应匹配器 - 中国IP
+  - tag: response_has_local_ip
+    type: response_matcher
+    args:
+      ip:
+        - provider:geoip:cn
+
+  # 主处理序列
+  - tag: main_sequence
+    type: sequence
+    args:
+      exec:
+        # 查询缓存
+        - lazy_cache
+
+        # hosts解析
+        - hosts
+
+        # 中国域名
+        - if: query_is_local
+          exec:
+            - forward_local
+            - _return
+
+        # 海外域名
+        - if: query_is_non_local
+          exec:
+            - forward_remote
+            - _return
+
+        # 其他域名：默认国内DNS
+        - forward_local
+
+servers:
+  - exec: main_sequence
+    listeners:
+      - protocol: udp
+        addr: 0.0.0.0:53
+      - protocol: tcp
+        addr: 0.0.0.0:53

@@ -166,11 +166,109 @@ Installation_dependency(){
 		apt-get install vim net-tools pkg-config build-essential libgnutls28-dev libwrap0-dev liblz4-dev libseccomp-dev libreadline-dev libnl-nf-3-dev libev-dev gnutls-bin ipcalc -y
 	fi
 }
+Install_mosdns(){
+	echo -e "${Info} 开始安装 mosdns 4.5.2..."
+
+	# 检测系统架构
+	arch=$(uname -m)
+	case ${arch} in
+		x86_64)
+			mosdns_arch="amd64"
+			;;
+		aarch64|arm64)
+			mosdns_arch="arm64"
+			;;
+		armv7l)
+			mosdns_arch="armv7"
+			;;
+		*)
+			echo -e "${Error} 不支持的架构: ${arch}" && exit 1
+			;;
+	esac
+
+	# 下载 mosdns 4.5.2
+	mkdir -p /tmp/mosdns && cd /tmp/mosdns
+	wget "https://github.com/IrineSistiana/mosdns/releases/download/v4.5.2/mosdns-linux-${mosdns_arch}.zip"
+	if [[ ! -s "mosdns-linux-${mosdns_arch}.zip" ]]; then
+		echo -e "${Error} mosdns 下载失败 !" && exit 1
+	fi
+
+	# 解压并安装
+	apt-get install unzip -y
+	unzip "mosdns-linux-${mosdns_arch}.zip"
+	chmod +x mosdns
+	mv mosdns /usr/local/bin/
+	cd ~ && rm -rf /tmp/mosdns
+
+	# 创建配置目录和日志目录
+	mkdir -p /etc/mosdns/data
+	mkdir -p /etc/mosdns/rules
+	mkdir -p /var/log/mosdns
+
+	# 下载配置文件和规则文件
+	echo -e "${Info} 下载 mosdns 配置文件和规则文件..."
+	wget --no-check-certificate -O /etc/mosdns/config.yaml "https://raw.githubusercontent.com/cookjohn/one/main/mosdns/config.yaml"
+	wget --no-check-certificate -O /etc/mosdns/rules/cnki_hosts.txt "https://raw.githubusercontent.com/cookjohn/one/main/mosdns/rules/cnki_hosts.txt"
+	wget --no-check-certificate -O /etc/mosdns/rules/cnki_domains.txt "https://raw.githubusercontent.com/cookjohn/one/main/mosdns/rules/cnki_domains.txt"
+
+	# 下载数据文件
+	echo -e "${Info} 下载 geosite 和 geoip 数据文件..."
+	wget --no-check-certificate -O /etc/mosdns/data/geosite.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
+	wget --no-check-certificate -O /etc/mosdns/data/geoip.dat "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat"
+
+	# 检查配置文件是否下载成功
+	if [[ ! -s "/etc/mosdns/config.yaml" ]]; then
+		echo -e "${Error} mosdns 配置文件下载失败 !" && exit 1
+	fi
+
+	# 创建 systemd 服务文件
+	cat > /etc/systemd/system/mosdns.service <<EOF
+[Unit]
+Description=mosdns DNS Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/etc/mosdns
+ExecStart=/usr/local/bin/mosdns start -c /etc/mosdns/config.yaml
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+	# 处理 systemd-resolved 端口占用问题
+	if systemctl is-active --quiet systemd-resolved; then
+		echo -e "${Info} 检测到 systemd-resolved 正在运行，配置 DNS stub 监听器..."
+		mkdir -p /etc/systemd/resolved.conf.d
+		cat > /etc/systemd/resolved.conf.d/mosdns.conf <<EOF
+[Resolve]
+DNSStubListener=no
+EOF
+		systemctl restart systemd-resolved
+	fi
+
+	# 启动 mosdns
+	systemctl daemon-reload
+	systemctl enable mosdns
+	systemctl start mosdns
+
+	# 检查 mosdns 是否启动成功
+	sleep 2
+	if systemctl is-active --quiet mosdns; then
+		echo -e "${Info} mosdns 4.5.2 安装并启动成功 !"
+	else
+		echo -e "${Error} mosdns 启动失败，请检查日志: /var/log/mosdns/mosdns.log" && exit 1
+	fi
+}
 Install_ocserv(){
 	check_root
 	[[ -e ${file} ]] && echo -e "${Error} ocserv 已安装，请检查 !" && exit 1
 	echo -e "${Info} 开始安装/配置 依赖..."
 	Installation_dependency
+	echo -e "${Info} 开始安装 mosdns..."
+	Install_mosdns
 	echo -e "${Info} 开始下载/安装 配置文件..."
 	Download_ocserv
 	echo -e "${Info} 开始下载/安装 服务脚本(init)..."
@@ -476,6 +574,7 @@ Set_iptables(){
 	echo -e "net.ipv4.tcp_l3mdev_accept = 1" >> /etc/sysctl.conf
 	echo -e "net.ipv4.tcp_congestion_control = bbr" >> /etc/sysctl.conf
 	echo -e "net.ipv6.conf.all.forwarding=1" >> /etc/sysctl.conf
+	echo -e "net.ipv6.conf.default.forwarding=1" >> /etc/sysctl.conf
 
 	# 增加网络优化参数
 	echo -e "net.core.rmem_max=26214400" >> /etc/sysctl.conf
@@ -515,10 +614,23 @@ Set_iptables(){
 			fi
 		fi
 	fi
-	iptables -t nat -A POSTROUTING -o ${Network_card} -j MASQUERADE
-	
+
+	# 配置 IPv4 NAT 规则 (10.10.10.0/24)
+	iptables -t nat -A POSTROUTING -s 10.10.10.0/24 -o ${Network_card} -j MASQUERADE
+	iptables -A FORWARD -s 10.10.10.0/24 -j ACCEPT
+	iptables -A FORWARD -d 10.10.10.0/24 -j ACCEPT
+
+	# 配置 IPv6 NAT 规则
+	ip6tables -t nat -A POSTROUTING -s fda9:4efe:7e3b:03ea::/64 -o ${Network_card} -j MASQUERADE
+	ip6tables -A FORWARD -s fda9:4efe:7e3b:03ea::/64 -j ACCEPT
+	ip6tables -A FORWARD -d fda9:4efe:7e3b:03ea::/64 -j ACCEPT
+
+	# 保存 iptables 规则
 	iptables-save > /etc/iptables.up.rules
-	echo -e '#!/bin/bash\n/sbin/iptables-restore < /etc/iptables.up.rules' > /etc/network/if-pre-up.d/iptables
+	ip6tables-save > /etc/ip6tables.up.rules
+
+	# 创建自动恢复脚本
+	echo -e '#!/bin/bash\n/sbin/iptables-restore < /etc/iptables.up.rules\n/sbin/ip6tables-restore < /etc/ip6tables.up.rules' > /etc/network/if-pre-up.d/iptables
 	chmod +x /etc/network/if-pre-up.d/iptables
 }
 Update_Shell(){
