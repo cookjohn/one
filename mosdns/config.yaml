@@ -19,6 +19,10 @@ data_providers:
     file: /etc/mosdns/rules/cnki_domains.txt
     auto_reload: true
 
+  - tag: ads_domains
+    file: /mosdns/data/geosite_ads.txt
+    auto_reload: true
+
 plugins:
   # 缓存
   - tag: lazy_cache
@@ -66,6 +70,13 @@ plugins:
         - provider:geosite:geolocation-!cn
         - provider:geosite:google
 
+  # 查询匹配器 - 广告域名
+  - tag: query_is_ads
+    type: query_matcher
+    args:
+      domain:
+        - provider:ads_domains
+
   # 响应匹配器 - 中国IP
   - tag: response_has_local_ip
     type: response_matcher
@@ -83,6 +94,12 @@ plugins:
 
         # hosts解析
         - hosts
+
+        # 广告屏蔽
+        - if: query_is_ads
+          exec:
+            - _block
+            - _return
 
         # 中国域名
         - if: query_is_local
